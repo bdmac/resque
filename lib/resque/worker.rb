@@ -38,7 +38,16 @@ module Resque
       reportedly_working = {}
 
       begin
-        reportedly_working = redis.mapped_mget(*names).reject do |key, value|
+        # Fixes strange case where mapped_mget was not properly passing block to Redis#call
+        workers = redis.mget(*names)
+        if workers.kind_of?(Array)
+          hash = Hash.new
+          names.zip(workers).each do |field, value|
+            hash[field] = value
+          end
+          workers = hash
+        end
+        reportedly_working = workers.reject do |key, value|
           value.nil? || value.empty?
         end
       rescue Redis::Distributed::CannotDistribute
@@ -48,9 +57,13 @@ module Resque
         end
       end
 
-      reportedly_working.keys.map do |key|
-        find key.sub("worker:", '')
-      end.compact
+      if reportedly_working.respond_to? :keys
+        reportedly_working.keys.map do |key|
+          find key.sub("worker:", '')
+        end.compact
+      else
+        []
+      end
     end
 
     # Returns a single worker object. Accepts a string id.
